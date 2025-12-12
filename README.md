@@ -1,6 +1,4 @@
 <div align="center">
-  <br/>
-  <img src="public/readme/hero.webp" alt="Project Banner">
 
   <h1><b>AI Resume Analyzer</b></h1>
 
