@@ -145,18 +145,6 @@ http://localhost:5173
 
 ---
 
-## 🖼 Screenshots
-
-> Add screenshots here once your final UI is ready.
-
-```
-public/readme/demo1.webp
-public/readme/demo2.webp
-public/readme/demo3.webp
-```
-
----
-
 ## 🚧 Future Improvements
 
 * Support multiple resume pages
@@ -172,4 +160,3 @@ public/readme/demo3.webp
   ⭐ <b>If this project helped or inspired you, consider starring the repo!</b> ⭐
   <br/><br/>
 </div>
-```
