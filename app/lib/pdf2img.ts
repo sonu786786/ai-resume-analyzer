@@ -9,25 +9,20 @@ let pdfjsLib: any = null;
 let loadPromise: Promise<any> | null = null;
 
 /**
- * Load pdf.js core and worker and set workerSrc to the emitted worker URL (Vite-friendly).
+ * Load pdfjs core and worker (via Vite's ?url) so workerSrc is a valid URL.
+ * This avoids SSR/bundler import issues and ensures the worker matches the library version.
  */
 async function loadPdfJs(): Promise<any> {
-  // Ensure this runs only in the browser (avoid SSR issues)
-  if (typeof window === "undefined") {
-    throw new Error("pdfjs can only be loaded in the browser");
-  }
-
   if (pdfjsLib) return pdfjsLib;
   if (loadPromise) return loadPromise;
 
+  // Dynamically import both library and worker URL (Vite will return a URL when using ?url)
   loadPromise = Promise.all([
-    // Use the ESM module for pdf core
     import("pdfjs-dist/build/pdf.min.mjs"),
-    // Ask Vite to return the worker as an emitted asset URL
     import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
-  ]).then(([lib, workerSrc]) => {
-    // workerSrc is a module with a default export which is the URL string
-    lib.GlobalWorkerOptions.workerSrc = (workerSrc as any).default;
+  ]).then(([lib, workerUrl]) => {
+    // workerUrl.default is the URL string returned by Vite for the worker file
+    (lib as any).GlobalWorkerOptions.workerSrc = (workerUrl as any).default;
     pdfjsLib = lib;
     return lib;
   });
@@ -35,68 +30,59 @@ async function loadPdfJs(): Promise<any> {
   return loadPromise;
 }
 
+/**
+ * Convert first page of PDF file -> PNG File and object URL.
+ */
 export async function convertPdfToImage(file: File): Promise<PdfConversionResult> {
   try {
-    // Guard: ensure running in browser
     if (typeof window === "undefined") {
-      return {
-        imageUrl: "",
-        file: null,
-        error: "PDF conversion must run in the browser.",
-      };
+      return { imageUrl: "", file: null, error: "PDF conversion must run in the browser" };
     }
 
     const lib = await loadPdfJs();
 
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await lib.getDocument({ data: arrayBuffer }).promise;
+    const loadingTask = lib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+
     const page = await pdf.getPage(1);
 
-    // tweak scale as you need (4 gives high-res)
-    const viewport = page.getViewport({ scale: 4 });
+    // Increase scale for better resolution if needed
+    const scale = 2;
+    const viewport = page.getViewport({ scale });
+
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
 
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
 
     if (context) {
       context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = "high";
+      // imageSmoothingQuality has limited TypeScript support in some libs; ignore if not present
+      try {
+        (context as any).imageSmoothingQuality = "high";
+      } catch {}
     }
 
     await page.render({ canvasContext: context!, viewport }).promise;
 
-    return new Promise((resolve) => {
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            const originalName = file.name.replace(/\.pdf$/i, "");
-            const imageFile = new File([blob], `${originalName}.png`, {
-              type: "image/png",
-            });
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, "image/png"));
+    if (!blob) {
+      return { imageUrl: "", file: null, error: "Failed to create image blob" };
+    }
 
-            resolve({
-              imageUrl: URL.createObjectURL(blob),
-              file: imageFile,
-            });
-          } else {
-            resolve({
-              imageUrl: "",
-              file: null,
-              error: "Failed to create image blob",
-            });
-          }
-        },
-        "image/png",
-        1.0
-      );
-    });
+    const originalName = file.name.replace(/\.pdf$/i, "");
+    const imageFile = new File([blob], `${originalName}.png`, { type: "image/png" });
+
+    // cleanup
+    try {
+      pdf.destroy();
+    } catch {}
+
+    return { imageUrl: URL.createObjectURL(blob), file: imageFile };
   } catch (err: any) {
-    return {
-      imageUrl: "",
-      file: null,
-      error: `Failed to convert PDF: ${err?.message ?? String(err)}`,
-    };
+    console.error("convertPdfToImage error:", err);
+    return { imageUrl: "", file: null, error: String(err) };
   }
 }
